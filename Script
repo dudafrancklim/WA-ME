@@ -1,0 +1,477 @@
+import os
+import re
+import pandas as pd
+import xlsxwriter
+
+main_dir = r'C:\Users\Maria-EduardaFranckl\New\Mexilhao'
+main_folders = os.listdir(main_dir)
+
+results = {folder: {
+    'las': "No", 'dlis': "No", 'lis': "No", 'sgy': "No", 'txt': "No",
+    'utm_n': None, 'utm_e': None, 'dados_direcionais': [], 'utm': [],
+    'litoestratigrafia': [],  
+    'cronoestratigrafia': [],  
+    'Info Crono': "No", 'Info Lito': "No", 'Litologia Interpretada': "No", 'dados direcionais': "No"
+} for folder in main_folders}
+
+def encontrar_utm_fundo_poco(arquivo):
+    padraoN = r'UTM\s+N Fundo Poco\s+:\s+([0-9]{7}\.[0-9]+)'
+    padraoE = r'UTM\s+E Fundo Poco\s+:\s+([0-9]{6}\.[0-9]+)'
+    
+    dados_utm = []
+
+    with open(arquivo, 'r', encoding='latin-1') as file:
+        conteudo = file.read()
+        
+        resultadoN = re.search(padraoN, conteudo)
+        resultadoE = re.search(padraoE, conteudo)
+        
+        if resultadoN and resultadoE:
+            numero_norte = resultadoN.group(1)
+            numero_leste = resultadoE.group(1)
+            dados_utm.append([numero_norte, numero_leste])
+
+    df_utm = pd.DataFrame(dados_utm, columns=["UTM_N", "UTM_E"])
+    
+    df_utm["UTM_N"] = pd.to_numeric(df_utm["UTM_N"], errors='coerce')
+    df_utm["UTM_E"] = pd.to_numeric(df_utm["UTM_E"], errors='coerce')
+    
+    return df_utm
+
+def encontrar_coordenadas_utm_fim2(arquivo):
+    padrao_inicio = r"\s*COORD\.UTM\s+FUNDO:\s+"
+    padrao_fim2 = r"\s{20,}"  
+
+    dados_utm = []
+
+    with open(arquivo, 'r') as file:
+        conteudo = file.read()
+
+        inicio = re.search(padrao_inicio, conteudo)
+        fim = re.search(padrao_fim2, conteudo[inicio.end():]) if inicio else None
+
+        if inicio and fim:
+            dados = conteudo[inicio.end():inicio.end() + fim.start()]
+            linhas = dados.splitlines()
+
+            for linha in linhas:
+                linha = linha.strip()
+                match_utm = re.search(r'([\d.]+)[NS]?\s+([\d.]+)[EW]?', linha)
+                if match_utm:
+                    utm_n = match_utm.group(1)  
+                    utm_e = match_utm.group(2)  
+
+                    dados_utm.append([utm_n, utm_e])
+
+            df_utm = pd.DataFrame(dados_utm, columns=["UTM_N", "UTM_E"])
+            
+            df_utm["UTM_N"] = pd.to_numeric(df_utm["UTM_N"], errors='coerce')
+            df_utm["UTM_E"] = pd.to_numeric(df_utm["UTM_E"], errors='coerce')
+            
+            return df_utm
+        else:
+            return pd.DataFrame()  
+
+def combinar_coordenadas_utm(arquivo):
+    df_fim1 = encontrar_utm_fundo_poco(arquivo)
+
+    df_fim2 = encontrar_coordenadas_utm_fim2(arquivo)
+
+    # Lógica para escolher qual DataFrame utilizar
+    if not df_fim1.empty:
+        df_completo = df_fim1  # Se o df_fim1 não estiver vazio, usa ele
+    elif not df_fim2.empty:
+        df_completo = df_fim2  # Se df_fim1 estiver vazio, usa o df_fim2
+    else:
+        df_completo = pd.DataFrame()  # Se ambos estiverem vazios, retorna um DataFrame vazio
+
+    return df_completo
+   
+def encontrar_dados_direcionais(arquivo):
+    padrao_inicio = r'PROFUNDIDADE\s+INCLINACAO\s+PROFUNDIDADE\s+AZIMUTE\s+RUMO\s+AFAST\s+N/S\s+AFAST\s+E/W\s+LATITUDE\s+LONGITUDE\s+UTM\s+NORTE\s+UTM\s+ESTE'
+    padrao_fim = r'-------------------------------------------------------------------------------------------------------------------------------------'
+
+    with open(arquivo, 'r') as file:
+        conteudo = file.read()
+        
+        inicio = re.search(padrao_inicio, conteudo)
+        fim = re.search(padrao_fim, conteudo)
+
+        if inicio and fim:
+            dados = conteudo[inicio.end():fim.start()]
+            linhas = dados.splitlines()
+
+            dados_filtrados = []
+            for linha in linhas:
+                if linha.startswith('('):
+                    continue
+                
+                colunas = re.split(r'\s+', linha.strip())
+                
+                if len(colunas) >= 4:
+                    try:
+                        profundidade = float(colunas[0].replace(',', '.'))
+                        inclinacao = float(colunas[1].replace(',', '.'))
+                        profundidade_vertical = float(colunas[2].replace(',', '.'))
+                        azimute = float(colunas[3].replace(',', '.'))
+
+                        dados_filtrados.append([profundidade, inclinacao, profundidade_vertical, azimute])
+                    except ValueError:
+                        continue
+
+            df_direcionais = pd.DataFrame(dados_filtrados, columns=["Profundidade", "Inclinacao", "Profundidade Vertical", "Azimute"])
+            return df_direcionais
+        else:
+            return pd.DataFrame()  
+
+def encontrar_litoestratigrafia(arquivo):
+    padrao_inicio = r'_{55,}\n\s*UNIDADES LITOESTRATIGRAFICAS\s+-\s+Profundidades MEDIDAS\n\s_{55,}'
+    padrao_fim = r'\s_{20,}'
+
+    dados_litoestratigrafia = []
+
+    with open(arquivo, 'r') as file:
+        conteudo = file.read()
+
+        inicio = re.search(padrao_inicio, conteudo)
+        fim = re.search(padrao_fim, conteudo[inicio.end():]) if inicio else None
+
+        if inicio and fim:
+            dados = conteudo[inicio.end():inicio.end() + fim.start()]
+            linhas = dados.splitlines()
+
+            for linha in linhas[1:]:  # Ignorar a linha de cabeçalho
+                linha = linha.strip()
+                
+                if re.match(r'^\b(B|R|Q|I|X)', linha):  
+                    match_unidade = re.search(r'\b(F|M|G)\s+([A-Za-z]+)\s+([\d\.-]+)', linha)
+                    if match_unidade:
+                        prefixo = match_unidade.group(1)  # O prefixo 'F' ou 'M'
+                        unidade_nome = match_unidade.group(2)  # O nome da unidade 
+                        topo = match_unidade.group(3)  # A profundidade 
+
+                        unidade_completa = f"{prefixo} {unidade_nome}"
+
+                        dados_litoestratigrafia.append([unidade_completa, topo])
+
+    return pd.DataFrame(dados_litoestratigrafia, columns=["UNIDADE", "TOPO(Prof)"]) if dados_litoestratigrafia else pd.DataFrame()
+
+
+def encontrar_litoestratigrafia2(arquivo):
+    padrao_inicio = r'\bUNID\.VERTICALIZADAS\s+-'
+    padrao_fim = r'-{30,}'
+
+    dados_litoestratigrafia = []
+
+    with open(arquivo, 'r') as file:
+        conteudo = file.read()
+
+        inicio = re.search(padrao_inicio, conteudo)
+        fim = re.search(padrao_fim, conteudo[inicio.end():]) if inicio else None
+
+        if inicio and fim:
+            dados = conteudo[inicio.end():inicio.end() + fim.start()]
+            linhas = dados.splitlines()
+
+            for linha in linhas:
+                linha = linha.strip()
+                if re.match(r'^L', linha):
+                    match_unidade = re.search(r'\b(B|R|Q|I|X)\s+(.+?)\s+\d{6}', linha)
+                    if match_unidade:
+                        unidade_nome = match_unidade.group(2).strip()
+                        topo_match = re.search(r'(\d+\.\d+)', linha)
+                        if topo_match:
+                            topo = topo_match.group(1)
+                            dados_litoestratigrafia.append([unidade_nome, topo])
+
+    return pd.DataFrame(dados_litoestratigrafia, columns=["UNIDADE", "TOPO(Prof/Cota)"]) if dados_litoestratigrafia else pd.DataFrame()
+
+
+def combinar_litoestratigrafia(arquivo):
+    # Tenta obter os dados com o primeiro padrão
+    df_lito1 = encontrar_litoestratigrafia(arquivo)
+
+    # Se não houver dados, tenta obter com o segundo padrão
+    df_lito2 = encontrar_litoestratigrafia2(arquivo)
+
+    # Combina os DataFrames, sem sobrescrever dados já presentes
+    if not df_lito1.empty:
+        return df_lito1
+    elif not df_lito2.empty:
+        return df_lito2
+    else:
+        return pd.DataFrame()  # Retorna um DataFrame vazio se ambos estiverem vazios
+
+def encontrar_cronoestratigrafia_fim1(arquivo):
+    padrao_inicio = r'_{55,}\n\s*UNIDADES CRONOESTRATIGRAFICAS\s+-\s+Profundidades MEDIDAS\n\s_{55,}'
+    padrao_fim1 = r'N\.SIDE\s*NUM\.\s*TOPO\s*COTA\s*BASE\s*COTA\s*RECUPERADO\s*DATA\s*AMOSTRAGEMDIAMETRO\s*TIPO TESTEMUNHO'
+    
+    dados_cronoestratigrafia = []
+
+    with open(arquivo, 'r') as file:
+        conteudo = file.read()
+        
+        inicio = re.search(padrao_inicio, conteudo)
+        fim = re.search(padrao_fim1, conteudo[inicio.end():]) if inicio else None
+        
+        if inicio and fim:
+            dados = conteudo[inicio.end():inicio.end() + fim.start()]
+            linhas = dados.splitlines()
+
+            for linha in linhas[1:]:  # Ignorar a primeira linha de cabeçalho
+                linha = linha.strip()
+
+                # Procurar o padrão da unidade entre letras específicas e um valor decimal
+                match_unidade = re.search(r'\b(B|R|Q|I|X)\s+(.+?)\s+([0-9]+\.[0-9]+)', linha)
+                if match_unidade:
+                    unidade_nome = match_unidade.group(2).strip()  # Extrai o texto entre as letras e o valor decimal
+                    topo = match_unidade.group(3)  # Extrai o valor decimal como topo
+                    dados_cronoestratigrafia.append([unidade_nome, topo])
+
+            df_cronoestratigrafia = pd.DataFrame(dados_cronoestratigrafia, columns=["UNIDADE", "TOPO(Prof/Cota)"])
+
+            df_cronoestratigrafia["TOPO(Prof/Cota)"] = pd.to_numeric(df_cronoestratigrafia["TOPO(Prof/Cota)"], errors='coerce')
+
+            return df_cronoestratigrafia
+        else:
+            return pd.DataFrame()  
+
+def encontrar_cronoestratigrafia_fim2(arquivo):
+    padrao_inicio = r'_{55,}\n\s*UNIDADES CRONOESTRATIGRAFICAS\s+-\s+Profundidades MEDIDAS\n\s_{55,}'
+    padrao_fim2 = r'\s_{20,}'  
+
+    dados_cronoestratigrafia = []
+
+    with open(arquivo, 'r') as file:
+        conteudo = file.read()
+
+        inicio = re.search(padrao_inicio, conteudo)
+        fim = re.search(padrao_fim2, conteudo[inicio.end():]) if inicio else None
+
+        if inicio and fim:
+            dados = conteudo[inicio.end():inicio.end() + fim.start()]
+            linhas = dados.splitlines()
+
+            for linha in linhas[1:]:  # Ignorar a primeira linha de cabeçalho
+                linha = linha.strip()
+
+                match_unidade = re.search(r'\b(B|R|Q|I|X)\s+(.+?)\s+([0-9]+\.[0-9]+)', linha)
+                if match_unidade:
+                    unidade_nome = match_unidade.group(2).strip()  
+                    topo = match_unidade.group(3)  
+                    dados_cronoestratigrafia.append([unidade_nome, topo])
+
+            df_cronoestratigrafia = pd.DataFrame(dados_cronoestratigrafia, columns=["UNIDADE", "TOPO(Prof/Cota)"])
+
+            df_cronoestratigrafia["TOPO(Prof/Cota)"] = pd.to_numeric(df_cronoestratigrafia["TOPO(Prof/Cota)"], errors='coerce')
+
+            return df_cronoestratigrafia
+        else:
+            return pd.DataFrame()  
+
+def encontrar_cronoestratigrafia3(arquivo):
+    import re
+    import pandas as pd
+
+    padrao_inicio = r'\bUNID\.VERTICALIZADAS\s+-'
+    padrao_fim = r'-{30,}'
+
+    with open(arquivo, 'r') as file:
+        conteudo = file.read()
+
+        inicio = re.search(padrao_inicio, conteudo)
+        fim = re.search(padrao_fim, conteudo[inicio.end():]) if inicio else None
+
+        if inicio and fim:
+            dados = conteudo[inicio.end():inicio.end() + fim.start()]
+            linhas = dados.splitlines()
+
+            dados_litoestratigrafia = []
+
+            for linha in linhas:
+                linha = linha.strip()
+
+                if re.match(r'^[C]', linha):
+                    match_unidade = re.search(r'^[C]\s+(?:[B|R|Q|I|X|\s{2}])?\s+([\w\.\-]+)\s+\d{6}', linha)
+
+                    if match_unidade:
+                        unidade_nome = match_unidade.group(1).strip()
+
+                        topo_match = re.search(r'(\d+\.\d+)', linha)
+                        if topo_match:
+                            topo = topo_match.group(1)
+                            dados_litoestratigrafia.append([unidade_nome, topo])
+
+            df_litoestratigrafia = pd.DataFrame(dados_litoestratigrafia, columns=["UNIDADE", "TOPO(Prof/Cota)"])
+
+            df_litoestratigrafia["TOPO(Prof/Cota)"] = pd.to_numeric(df_litoestratigrafia["TOPO(Prof/Cota)"], errors='coerce')
+
+            return df_litoestratigrafia
+        else:
+            return pd.DataFrame()
+
+def combinar_cronoestratigrafia(arquivo):
+    df_fim1 = encontrar_cronoestratigrafia_fim1(arquivo)
+    
+    df_fim2 = encontrar_cronoestratigrafia_fim2(arquivo)
+
+    df_fim3 = encontrar_cronoestratigrafia3(arquivo)
+
+    if not df_fim1.empty:
+        df_completo = df_fim1  
+    elif not df_fim2.empty:
+        df_completo = df_fim2  
+    elif not df_fim3.empty:
+        df_completo = df_fim3  
+    else:
+        df_completo = pd.DataFrame() 
+
+    return df_completo
+
+for root, dirs, files in os.walk(main_dir):
+    main_folder_name = os.path.basename(os.path.dirname(root))
+    
+    for file in files:
+        if file.endswith('.las'):
+            results[main_folder_name]['las'] = "Yes"
+        elif file.endswith('.dlis'):
+            results[main_folder_name]['dlis'] = "Yes"
+        elif file.endswith('.lis'):
+            results[main_folder_name]['lis'] = "Yes"
+        elif file.endswith('.sgy'):
+            results[main_folder_name]['sgy'] = "Yes"
+        elif file.endswith('.txt'):
+            results[main_folder_name]['txt'] = "Yes"
+
+            file_path = os.path.join(root, file)
+            
+            df_utm = combinar_coordenadas_utm(file_path)
+            
+            if not df_utm.empty:
+                results[main_folder_name]['utm'].append(df_utm)
+             
+            # Encontrar dados direcionais (somente as 4 primeiras colunas)
+            df_direcionais = encontrar_dados_direcionais(file_path)
+            if not df_direcionais.empty:
+                results[main_folder_name]['dados_direcionais'].append(df_direcionais)
+                results[main_folder_name]['dados direcionais'] = "Yes"
+            
+            df_litoestratigrafia = combinar_litoestratigrafia(file_path)
+            if not df_litoestratigrafia.empty:
+                results[main_folder_name]['litoestratigrafia'].append(df_litoestratigrafia)
+                results[main_folder_name]['Info Lito'] = "Yes"
+
+            df_cronoestratigrafia = combinar_cronoestratigrafia(file_path)
+            if not df_cronoestratigrafia.empty:
+                results[main_folder_name]['cronoestratigrafia'].append(df_cronoestratigrafia)
+                results[main_folder_name]['Info Crono'] = "Yes"
+
+            # Verificar presença das palavras "Cronoestratigrafica", "Litoestratigrafica" e "Litologia"
+            with open(file_path, 'r') as file_content:
+                conteudo = file_content.read()
+                
+                if 'LITOLOGIA' in conteudo and results[main_folder_name]['Litologia Interpretada'] == "No":
+                    results[main_folder_name]['Litologia Interpretada'] = "Yes"
+
+def colorir_celulas(value):
+    if value == "Yes":
+        return 'background-color: green'
+    elif value == "No":
+        return 'background-color: red'
+    return ''
+
+
+data_info = {
+    'Well': [],
+    '.las': [],
+    '.dlis': [],
+    '.lis': [],
+    'Well seismic .sgy': [],
+    '.txt': [],
+    'Info Crono': [],
+    'Info Lito': [],
+    'Litologia Interpretada': [],
+    'dados direcionais': []
+}
+
+for well, status in results.items():
+    data_info['Well'].append(well)
+    data_info['.las'].append(status['las'])
+    data_info['.dlis'].append(status['dlis'])
+    data_info['.lis'].append(status['lis'])
+    data_info['Well seismic .sgy'].append(status['sgy'])
+    data_info['.txt'].append(status['txt'])
+    data_info['Info Crono'].append(status['Info Crono'])
+    data_info['Info Lito'].append(status['Info Lito'])
+    data_info['Litologia Interpretada'].append(status['Litologia Interpretada'])
+    data_info['dados direcionais'].append(status['dados direcionais'])
+
+df_info = pd.DataFrame(data_info)
+dados_utm_lista = []
+
+styled_df = df_info.style.map(colorir_celulas, subset=['.las', '.dlis', '.lis', 'Well seismic .sgy', '.txt', 'Info Crono', 'Info Lito', 
+                                                       'Litologia Interpretada', 'dados direcionais'])
+
+output_path = r'C:\Users\Maria-EduardaFranckl\New\Acre\InfoWellsPython.xlsx'
+
+txt_output_path = r'C:\Users\Maria-EduardaFranckl\New\Acre\UTM_ALL.txt'
+
+todos_dados_utm = []
+
+with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+    styled_df.to_excel(writer, sheet_name='InfoAllWells', index=False)
+
+    for well, status in results.items():
+        # Se existirem dados de coordenadas UTM
+        if status['utm']:  # Verifica se a chave 'utm' contém algum dado
+            # Combina os DataFrames em dados_utm_lista, se houver dados
+            dados_utm_completos = pd.concat(status['utm'], ignore_index=True)
+
+            # Adiciona a coluna 'Well' para identificar o poço
+            dados_utm_completos['Well'] = well
+            
+            # Adiciona esses dados à lista para exportação geral
+            todos_dados_utm.append(dados_utm_completos)
+
+        # Exportar dados direcionais para cada poço
+        if status['dados_direcionais']:
+            dados_direcionais_completos = pd.concat(status['dados_direcionais'], ignore_index=True)
+            dados_direcionais_completos['Well'] = well
+            dados_direcionais_completos.to_excel(writer, sheet_name=f"DIR-{well}", index=False)
+
+            # Salvar em .txt
+            dir_txt_path = os.path.join(os.path.dirname(output_path), f"DIR-{well}.txt")
+            dados_direcionais_completos.to_csv(dir_txt_path, sep='\t', index=False)
+
+        if status['litoestratigrafia']:
+            litoestratigrafia_completa = pd.concat(status['litoestratigrafia'], ignore_index=True)
+            litoestratigrafia_completa['Well'] = well
+            litoestratigrafia_completa.to_excel(writer, sheet_name=f"LITO-{well}", index=False)
+
+            lito_txt_path = os.path.join(os.path.dirname(output_path), f"LITO-{well}.txt")
+            litoestratigrafia_completa.to_csv(lito_txt_path, sep='\t', index=False)
+
+        if status['cronoestratigrafia']:
+            cronoestratigrafia_completa = pd.concat(status['cronoestratigrafia'], ignore_index=True)
+            cronoestratigrafia_completa['Well'] = well
+            cronoestratigrafia_completa.to_excel(writer, sheet_name=f"CRONO-{well}", index=False)
+
+            crono_txt_path = os.path.join(os.path.dirname(output_path), f"CRONO-{well}.txt")
+            cronoestratigrafia_completa.to_csv(crono_txt_path, sep='\t', index=False)
+
+    # Adicionar todas as coordenadas UTM na aba "UTM_ALL"
+    if todos_dados_utm:
+        df_utm_total = pd.concat(todos_dados_utm, ignore_index=True)
+
+        # Adiciona a coluna 'Well' para cada conjunto de coordenadas
+        df_utm_total['Well'] = df_utm_total['Well'].ffill()  # Preenche o 'Well' onde for necessário
+
+        df_utm_total.to_excel(writer, sheet_name="UTM_ALL", index=False)
+
+    # Gerar arquivo .txt com todas as coordenadas UTM
+    if todos_dados_utm:
+        with open(txt_output_path, 'w') as txt_file:
+            for index, row in df_utm_total.iterrows():
+                txt_file.write(f"{row['Well']} {row['UTM_N']} {row['UTM_E']}\n")
+   
+print(f'Dados salvos em {output_path} e arquivos .txt gerados na mesma pasta.')
