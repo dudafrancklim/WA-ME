@@ -7,7 +7,7 @@ O objetivo deste projeto é facilitar o acesso a dados de poços disponibilizado
 
 ATENÇÃO: Como os dados da ANP nem sempre seguem o mesmo padrão, pode ser que essas informações não sejam de todo corretas. Sendo assim, é recomendável checar alguns padrões para chegar a suas próprias conclusões. Um exemplo concreto disso é o pensamento: "se meu poço tem informações complexas  trabalhosas e adquirir, como litologia interpretada, com certeza ele tem coordenadas UTM, que são bem mais básicos e podem estar só em PDF, e, provavelmente, tem dados de lito e/ou cronoestratigrafia, que costumam estar ligados". Ademais, se o seu trabalho for extremamente detalhado e depender da maior quantidade de poços com informações específicas disponíveis, é recomendável abrir os arquivos disponibilizados pela ANP um a um e checar manualmente todas as informações.
 
-🏠 Homepage: https://github.com/dudafrancklim/geolog-python-ufrj
+🏠 Homepage: https://github.com/dudafrancklim
 
 👤 Author: Maria Eduarda Francklim - Github: https://github.com/dudafrancklim; LinkedIn: https://linkedin.com/in/mefrancklim
 
@@ -16,5 +16,6 @@ Gostaria de agradecer a todos que ajudaram diretamente na confecção desse cód
 
 🫰 Contribuições, avisos sobre problemas e outros comentários são sempre bem vindos! 
 
+[![DOI](https://zenodo.org/badge/907123739.svg)](https://doi.org/10.5281/zenodo.14545129)
 
 This README was generated with ❤️ by readme-md-generator (https://github.com/kefranabg/readme-md-generator)
