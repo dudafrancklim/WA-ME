@@ -7,10 +7,9 @@ main_dir = r'C:\Users\Maria-EduardaFranckl\New\Mexilhao'
 main_folders = os.listdir(main_dir)
 
 results = {folder: {
-    'las': "No", 'dlis': "No", 'lis': "No", 'sgy': "No", 'txt': "No",
+    'UTM': "No", 'las': "No", 'dlis': "No", 'lis': "No", 'sgy': "No", 'txt': "No",
     'utm_n': None, 'utm_e': None, 'dados_direcionais': [], 'utm': [],
-    'litoestratigrafia': [],  
-    'cronoestratigrafia': [],  
+    'litoestratigrafia': [],  'cronoestratigrafia': [],  
     'Info Crono': "No", 'Info Lito': "No", 'Litologia Interpretada': "No", 'dados direcionais': "No"
 } for folder in main_folders}
 
@@ -383,44 +382,53 @@ def colorir_celulas(value):
 
 data_info = {
     'Well': [],
+    '.txt': [],
+    'UTM': [],
+    'dados direcionais': [],
     '.las': [],
     '.dlis': [],
     '.lis': [],
-    'Well seismic .sgy': [],
-    '.txt': [],
     'Info Crono': [],
     'Info Lito': [],
     'Litologia Interpretada': [],
-    'dados direcionais': []
+    'Well seismic .sgy': [],
 }
 
 for well, status in results.items():
     data_info['Well'].append(well)
+    data_info['.txt'].append(status['txt'])
+    data_info['UTM'].append("Yes" if status['utm'] else "No")
+    data_info['dados direcionais'].append(status['dados direcionais'])
     data_info['.las'].append(status['las'])
     data_info['.dlis'].append(status['dlis'])
     data_info['.lis'].append(status['lis'])
-    data_info['Well seismic .sgy'].append(status['sgy'])
-    data_info['.txt'].append(status['txt'])
     data_info['Info Crono'].append(status['Info Crono'])
     data_info['Info Lito'].append(status['Info Lito'])
     data_info['Litologia Interpretada'].append(status['Litologia Interpretada'])
-    data_info['dados direcionais'].append(status['dados direcionais'])
-
+    data_info['Well seismic .sgy'].append(status['sgy'])
+    
 df_info = pd.DataFrame(data_info)
 dados_utm_lista = []
 
-styled_df = df_info.style.map(colorir_celulas, subset=['.las', '.dlis', '.lis', 'Well seismic .sgy', '.txt', 'Info Crono', 'Info Lito', 
-                                                       'Litologia Interpretada', 'dados direcionais'])
+styled_df = df_info.style.map(colorir_celulas, subset=['.txt', 'UTM', 'dados direcionais', '.las', '.dlis', '.lis', 'Info Crono', 'Info Lito', 
+                                                       'Litologia Interpretada', 'Well seismic .sgy'])
 
-output_path = r'C:\Users\Maria-EduardaFranckl\New\Acre\InfoWellsPython.xlsx'
+output_path = r'C:\Users\Maria-EduardaFranckl\New\Mexilhao\InfoWellsPython.xlsx'
 
-txt_output_path = r'C:\Users\Maria-EduardaFranckl\New\Acre\UTM_ALL.txt'
+txt_output_path = r'C:\Users\Maria-EduardaFranckl\New\Mexilhao\UTM_ALL.txt'
 
 todos_dados_utm = []
 
 with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-    styled_df.to_excel(writer, sheet_name='InfoAllWells', index=False)
+    styled_df.to_excel(writer, sheet_name='InfoAllWells', index=False, startrow = 0)
 
+    # Configuração do Sort & Filter
+    workbook = writer.book
+    worksheet = writer.sheets['InfoAllWells']
+
+    # Aplicando o Sort & Filter na área de dados
+    worksheet.autofilter('A1:K{max_row}'.format(max_row=df_info.shape[0] + 1))
+    
     for well, status in results.items():
         # Se existirem dados de coordenadas UTM
         if status['utm']:  # Verifica se a chave 'utm' contém algum dado
@@ -461,10 +469,10 @@ with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
 
     # Adicionar todas as coordenadas UTM na aba "UTM_ALL"
     if todos_dados_utm:
-        df_utm_total = pd.concat(todos_dados_utm, ignore_index=True)
-
         # Adiciona a coluna 'Well' para cada conjunto de coordenadas
         df_utm_total['Well'] = df_utm_total['Well'].ffill()  # Preenche o 'Well' onde for necessário
+        
+        df_utm_total = pd.concat(todos_dados_utm, ignore_index=True)
 
         df_utm_total.to_excel(writer, sheet_name="UTM_ALL", index=False)
 
